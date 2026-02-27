@@ -3,6 +3,7 @@ import { loadConfig, getConfig, saveConfig, applyConfigChange, addAllowedEndpoin
 import { listChangedFiles, requestFileSync } from "./sync";
 import { listUnsyncedBranches, requestGitSync } from "./git-sync";
 import { startProxy } from "./proxy";
+import { submitExec, getExecRequest } from "./exec";
 import type { Category, ConfigChangeProposal, PermissionRequest } from "./types";
 import index from "../ui/index.html";
 
@@ -113,10 +114,35 @@ const server = Bun.serve<WSData>({
         return Response.json({ branch, approved });
       },
     },
+
+    // --- Exec endpoints ---
+    "/api/exec": {
+      POST: async (req) => {
+        const { command, cwd, reason, timeout } = (await req.json()) as {
+          command: string;
+          cwd?: string;
+          reason?: string;
+          timeout?: number;
+        };
+        if (!command) {
+          return Response.json({ error: "command is required" }, { status: 400 });
+        }
+        const execReq = await submitExec(command, cwd, reason, timeout);
+        return Response.json({ id: execReq.id }, { status: 201 });
+      },
+    },
   },
 
   async fetch(req, server) {
     const url = new URL(req.url);
+
+    // Handle exec result lookup
+    const execMatch = url.pathname.match(/^\/api\/exec\/([^/]+)$/);
+    if (execMatch && req.method === "GET") {
+      const execReq = getExecRequest(execMatch[1]);
+      if (!execReq) return Response.json({ error: "not found" }, { status: 404 });
+      return Response.json(execReq);
+    }
 
     // Handle queue item approve/deny with path params
     const queueMatch = url.pathname.match(/^\/api\/queue\/([^/]+)\/(approve|deny)$/);

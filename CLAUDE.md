@@ -1,4 +1,4 @@
-AI Sandbox — Safety container for self-evolving AI agents.
+fishbowl — Safety container for self-evolving AI agents.
 
 ## Running
 
@@ -17,7 +17,8 @@ docker compose up # Full stack: server + proxy + agent container
 - `src/config.ts` — Sandbox config management
 - `src/proxy.ts` — HTTP/HTTPS proxy with allowlist + queue
 - `src/server.ts` — Permission server (Bun.serve)
-- `src/sync.ts` — File sync from container overlay to host
+- `src/exec.ts` — Host command execution (approve-each only)
+- `src/sync.ts` — File sync from container to host
 - `src/git-sync.ts` — Git staging repo → real remote sync
 - `src/cli.ts` — Terminal approval tool
 - `ui/` — React web dashboard

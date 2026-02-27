@@ -1,4 +1,4 @@
-export type Category = "network" | "filesystem" | "git" | "packages" | "sandbox";
+export type Category = "network" | "filesystem" | "git" | "packages" | "sandbox" | "exec";
 
 export type ApprovalMode = "approve-each" | "approve-bulk" | "allow-all" | "deny-all";
 
@@ -59,5 +59,6 @@ export const DEFAULT_CONFIG: SandboxConfig = {
     git: { mode: "approve-each" },
     packages: { mode: "approve-each" },
     sandbox: { mode: "approve-each" },
+    exec: { mode: "approve-each" },
   },
 };

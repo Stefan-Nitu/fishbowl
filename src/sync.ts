@@ -2,29 +2,34 @@ import { queue } from "./queue";
 import { getCategoryMode } from "./config";
 import type { SyncFile } from "./types";
 
-const OVERLAY_UPPER = process.env.OVERLAY_UPPER || "/workspace/upper";
-const HOST_PROJECT = process.env.HOST_PROJECT || "/workspace/host";
+const WORKSPACE = process.env.WORKSPACE || "/workspace/merged";
+const HOST_PROJECT = process.env.HOST_PROJECT || "/workspace/lower";
 
 export async function listChangedFiles(): Promise<SyncFile[]> {
   const files: SyncFile[] = [];
   try {
-    await scanDir(OVERLAY_UPPER, "", files);
+    // Use git to detect changes in the workspace
+    const result = await Bun.$`git -C ${WORKSPACE} diff --name-only HEAD`.text();
+    const untrackedResult = await Bun.$`git -C ${WORKSPACE} ls-files --others --exclude-standard`.text();
+
+    const paths = [
+      ...result.trim().split("\n"),
+      ...untrackedResult.trim().split("\n"),
+    ].filter(Boolean);
+
+    for (const path of paths) {
+      const file = Bun.file(`${WORKSPACE}/${path}`);
+      const stat = await file.stat?.();
+      files.push({
+        path,
+        size: file.size,
+        modifiedAt: stat?.mtimeMs ?? Date.now(),
+      });
+    }
   } catch {
-    // Overlay dir may not exist outside Docker
+    // Git dir may not exist outside Docker
   }
   return files;
-}
-
-async function scanDir(base: string, rel: string, out: SyncFile[]) {
-  const glob = new Bun.Glob("**/*");
-  for await (const path of glob.scan({ cwd: base, onlyFiles: true })) {
-    const file = Bun.file(`${base}/${path}`);
-    out.push({
-      path,
-      size: file.size,
-      modifiedAt: (await file.stat?.())?.mtimeMs ?? Date.now(),
-    });
-  }
 }
 
 export async function requestFileSync(files: SyncFile[]): Promise<Map<string, boolean>> {
@@ -69,7 +74,7 @@ export async function requestFileSync(files: SyncFile[]): Promise<Map<string, bo
 }
 
 async function syncFile(relPath: string) {
-  const src = `${OVERLAY_UPPER}/${relPath}`;
+  const src = `${WORKSPACE}/${relPath}`;
   const dst = `${HOST_PROJECT}/${relPath}`;
 
   // Ensure destination directory exists

@@ -6,6 +6,7 @@
     "filesystem": { "mode": "approve-each" },
     "git": { "mode": "approve-each" },
     "packages": { "mode": "approve-each" },
-    "sandbox": { "mode": "approve-each" }
+    "sandbox": { "mode": "approve-each" },
+    "exec": { "mode": "approve-each" }
   }
 }

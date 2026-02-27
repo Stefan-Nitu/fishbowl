@@ -1,5 +1,5 @@
 {
-  "name": "ai-sandbox",
+  "name": "fishbowl",
   "version": "0.1.0",
   "description": "Safety container for self-evolving AI agents",
   "type": "module",

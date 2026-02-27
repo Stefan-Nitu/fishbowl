@@ -75,7 +75,7 @@ test("applyConfigChange updates nested value", () => {
   setCategoryMode("network", "approve-each");
 });
 
-test("all five categories exist in default config", () => {
+test("all six categories exist in default config", () => {
   const config = getConfig();
   expect(Object.keys(config.categories)).toEqual([
     "network",
@@ -83,5 +83,6 @@ test("all five categories exist in default config", () => {
     "git",
     "packages",
     "sandbox",
+    "exec",
   ]);
 });

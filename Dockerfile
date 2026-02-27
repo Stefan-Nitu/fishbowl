@@ -1,7 +1,6 @@
 FROM oven/bun:1 AS base
 
 RUN apt-get update && apt-get install -y \
-    fuse-overlayfs \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -16,6 +15,6 @@ RUN bun install --frozen-lockfile 2>/dev/null || bun install
 COPY . .
 
 # Create data directories
-RUN mkdir -p /data /workspace/lower /workspace/upper /workspace/work /workspace/merged
+RUN mkdir -p /data /workspace/lower /workspace/merged
 
 ENTRYPOINT ["/sandbox/container/entrypoint.sh"]

@@ -108,6 +108,7 @@ header .status.connected {
 .category-badge.git { background: #1a3a2a; color: #5bf59b; }
 .category-badge.packages { background: #3a2a1a; color: #f5b85b; }
 .category-badge.sandbox { background: #3a1a1a; color: #f55b5b; }
+.category-badge.exec { background: #3a2a0a; color: #f5a03b; }
 
 .request-card .action {
   font-size: 14px;
@@ -235,3 +236,46 @@ header .status.connected {
 .status-badge.approved { background: #1a3a2a; color: #5bf59b; }
 .status-badge.denied { background: #3a1a1a; color: #f55b5b; }
 .status-badge.pending { background: #2a2a1a; color: #f5e55b; }
+
+.exec-command {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-left: 3px solid #f5a03b;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: monospace;
+  color: #f5a03b;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.exec-output {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.exec-stdout, .exec-stderr {
+  background: #0d0d0d;
+  border: 1px solid #222;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: monospace;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.exec-stdout { color: #ccc; }
+.exec-stderr { color: #f55b5b; border-color: #3a1a1a; }
+
+.exec-exit {
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.exec-exit.success { color: #5bf59b; }
+.exec-exit.failure { color: #f55b5b; }

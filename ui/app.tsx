@@ -9,9 +9,16 @@ interface PermissionRequest {
   description: string;
   reason?: string;
   status: "pending" | "approved" | "denied";
+  metadata?: Record<string, unknown>;
   createdAt: number;
   resolvedAt?: number;
   resolvedBy?: string;
+}
+
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
 }
 
 interface SandboxConfig {
@@ -28,6 +35,22 @@ function timeAgo(ts: number): string {
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   return `${Math.floor(s / 3600)}h ago`;
+}
+
+function ExecOutput({ result }: { result: ExecResult }) {
+  return (
+    <div className="exec-output">
+      {result.stdout && (
+        <pre className="exec-stdout">{result.stdout}</pre>
+      )}
+      {result.stderr && (
+        <pre className="exec-stderr">{result.stderr}</pre>
+      )}
+      <span className={`exec-exit ${result.exitCode === 0 ? "success" : "failure"}`}>
+        exit {result.exitCode}
+      </span>
+    </div>
+  );
 }
 
 function App() {
@@ -109,7 +132,7 @@ function App() {
   return (
     <div className="app">
       <header>
-        <h1>AI Sandbox</h1>
+        <h1>fishbowl</h1>
         <span className={`status ${connected ? "connected" : ""}`}>
           {connected ? "live" : "disconnected"}
         </span>
@@ -163,6 +186,9 @@ function App() {
                   <span className={`category-badge ${req.category}`}>{req.category}</span>
                   <span className="action">{req.action}</span>
                 </div>
+                {req.category === "exec" && req.metadata?.command && (
+                  <pre className="exec-command">{String(req.metadata.command)}</pre>
+                )}
                 <div className="description">{req.description}</div>
                 {req.reason && <div className="description">Reason: {req.reason}</div>}
                 <div className="time">{req.id} — {timeAgo(req.createdAt)}</div>
@@ -231,6 +257,9 @@ function App() {
                   <span className={`status-badge ${req.status}`}>{req.status}</span>
                 </div>
                 <div className="description">{req.description}</div>
+                {req.category === "exec" && req.metadata?.execResult && (
+                  <ExecOutput result={req.metadata.execResult as ExecResult} />
+                )}
                 <div className="time">
                   {req.id} — {timeAgo(req.createdAt)}
                   {req.resolvedAt && ` — resolved ${timeAgo(req.resolvedAt)}`}

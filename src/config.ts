@@ -33,6 +33,8 @@ export function isEndpointAllowed(host: string): boolean {
 }
 
 export function getCategoryMode(category: Category): ApprovalMode {
+  // exec category is always approve-each, regardless of config
+  if (category === "exec") return "approve-each";
   return current.categories[category]?.mode ?? "approve-each";
 }
 
@@ -64,5 +66,7 @@ export function removeAllowedEndpoint(endpoint: string): boolean {
 }
 
 export function setCategoryMode(category: Category, mode: ApprovalMode): void {
+  // exec category ALWAYS requires approve-each — never allow override
+  if (category === "exec" && mode !== "approve-each") return;
   current.categories[category] = { mode };
 }

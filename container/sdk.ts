@@ -9,7 +9,7 @@
 
 const API = process.env.SANDBOX_API || "http://localhost:3700";
 
-export type Category = "network" | "filesystem" | "git" | "packages" | "sandbox";
+export type Category = "network" | "filesystem" | "git" | "packages" | "sandbox" | "exec";
 
 interface PermissionResponse {
   id: string;
@@ -95,11 +95,52 @@ async function getConfig(): Promise<Record<string, unknown>> {
   return res.json();
 }
 
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+interface ExecResponse {
+  id: string;
+  status: "pending" | "approved" | "denied" | "running" | "completed" | "failed";
+  result?: ExecResult;
+}
+
+async function requestExec(
+  command: string,
+  reason?: string,
+  cwd?: string
+): Promise<ExecResult> {
+  const res = await fetch(`${API}/api/exec`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command, reason, cwd }),
+  });
+
+  const { id } = (await res.json()) as { id: string };
+
+  // Poll until completed
+  while (true) {
+    await Bun.sleep(500);
+    const poll = await fetch(`${API}/api/exec/${id}`);
+    const data = (await poll.json()) as ExecResponse;
+
+    if (data.status === "denied") {
+      throw new Error(`Exec request denied: ${command}`);
+    }
+    if (data.status === "completed" || data.status === "failed") {
+      return data.result!;
+    }
+  }
+}
+
 export const sandbox = {
   requestPermission,
   proposeConfigChange,
   listPending,
   getConfig,
+  requestExec,
 };
 
 export default sandbox;

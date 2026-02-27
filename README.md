@@ -1,6 +1,6 @@
-# sandbox
+# fishbowl
 
-Safety container for self-evolving AI agents. The agent can read anything, write freely inside its sandbox, but any effect on the outside world requires human approval.
+Safety container for self-evolving AI agents. The agent can read anything, write freely inside its fishbowl, but any effect on the outside world requires human approval.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -23,15 +23,14 @@ Safety container for self-evolving AI agents. The agent can read anything, write
 │                     └───────┬────────┘           │
 ├─────────────────────────────┼───────────────────┤
 │  DOCKER CONTAINER           │                    │
-│                             ▼                    │
+│  (internal network only)    ▼                    │
 │  ┌─────────────────────────────────────────┐     │
-│  │  /workspace (overlayfs)                 │     │
+│  │  /workspace/merged (git-tracked copy)   │     │
 │  │  ├── lower: host project (read-only)    │     │
-│  │  ├── upper: agent writes (captured)     │     │
-│  │  └── merged: what agent sees            │     │
+│  │  └── merged: writable copy (git diff)   │     │
 │  │                                         │     │
 │  │  Agent process (any AI agent)           │     │
-│  │  HTTP_PROXY → host proxy                │     │
+│  │  No direct internet access              │     │
 │  │  SANDBOX_API → permission server        │     │
 │  └─────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────┘
@@ -56,11 +55,13 @@ Open http://localhost:3700 for the web dashboard.
 
 ## How It Works
 
-An AI agent runs inside a Docker container with an overlayfs filesystem. It sees the host project as read-only and all writes go to a separate layer. Network traffic goes through an HTTP proxy. Everything the agent wants to do outside the sandbox goes through an approval queue.
+An AI agent runs inside a Docker container on an isolated internal network. The host project is copied into the workspace and tracked with git. Network traffic goes through the permission server's proxy. Everything the agent wants to do outside the fishbowl goes through an approval queue.
 
 **The agent keeps evolving while waiting.** Approvals are async — the agent doesn't block.
 
 **The agent can propose changes to its own sandbox rules.** These go through the `sandbox` category and always require individual human approval.
+
+**The agent can request host command execution.** These go through the `exec` category and always require individual approval — no bulk or auto-approve.
 
 ## Permission Categories
 
@@ -71,12 +72,13 @@ An AI agent runs inside a Docker container with an overlayfs filesystem. It sees
 | `git` | Pushing from the staging repo to the real remote | Per-branch |
 | `packages` | Installing new packages | Per-package |
 | `sandbox` | Changing sandbox config (allowlist, modes) | Always individual |
+| `exec` | Executing commands on the host | Always individual |
 
-Each category has a mode: `approve-each`, `approve-bulk`, `allow-all`, or `deny-all`. Set in `sandbox.config.json`.
+Each category has a mode: `approve-each`, `approve-bulk`, `allow-all`, or `deny-all`. Set in `sandbox.config.json`. The `exec` category is locked to `approve-each` and cannot be overridden.
 
 ## Git Inside the Sandbox
 
-All git operations inside the container are free. The agent's `origin` points to a local bare staging repo — commits, branches, pushes are instant and safe. Getting changes to the real remote is a `git` category approval, so the human can review the diff before it leaves the sandbox.
+All git operations inside the container are free. The agent's `origin` points to a local bare staging repo — commits, branches, pushes are instant and safe. Getting changes to the real remote is a `git` category approval, so the human can review the diff before it leaves the fishbowl.
 
 ## Agent SDK
 
@@ -91,6 +93,13 @@ const ok = await sandbox.requestPermission(
   "GET https://example.com/data.json",
   "Need training data"
 );
+
+// Execute a command on the host (requires individual approval)
+const result = await sandbox.requestExec(
+  "bun test",
+  "Need to run tests on host"
+);
+console.log(result.stdout, result.exitCode);
 
 // Propose a sandbox config change
 await sandbox.proposeConfigChange(
@@ -113,10 +122,12 @@ await sandbox.proposeConfigChange(
 | `POST` | `/api/queue/bulk` | Bulk approve/deny by category |
 | `GET` | `/api/config` | Current sandbox config |
 | `POST` | `/api/config/propose` | Agent proposes a config change |
-| `GET` | `/api/sync/files` | List changed files in overlay |
+| `GET` | `/api/sync/files` | List changed files in workspace |
 | `POST` | `/api/sync/files` | Request file sync to host |
 | `GET` | `/api/sync/git` | List unsynced branches |
 | `POST` | `/api/sync/git` | Request git sync to real remote |
+| `POST` | `/api/exec` | Submit exec request (returns `{ id }`) |
+| `GET` | `/api/exec/:id` | Get exec result |
 
 ### WebSocket
 
@@ -148,7 +159,8 @@ bun run cli watch                   # Interactive mode with live updates
     "filesystem": { "mode": "approve-each" },
     "git": { "mode": "approve-each" },
     "packages": { "mode": "approve-each" },
-    "sandbox": { "mode": "approve-each" }
+    "sandbox": { "mode": "approve-each" },
+    "exec": { "mode": "approve-each" }
   }
 }
 ```
@@ -162,15 +174,23 @@ docker compose up
 # Run a specific agent command
 docker compose run agent bun run my-agent.ts
 
-# Mount a specific project into the sandbox
+# Mount a specific project into the fishbowl
 HOST_PROJECT=/path/to/project docker compose up
 ```
 
 The container gets:
-- **overlayfs**: host project read-only, agent writes captured separately
-- **git staging**: local bare repo as `origin`, free to commit/push/branch
-- **HTTP proxy**: all outbound traffic routed through the approval proxy
+- **Internal network**: agent can only reach the permission server, not the internet
+- **Git-tracked workspace**: host project copied in, changes tracked via git diff
+- **Git staging**: local bare repo as `origin`, free to commit/push/branch
+- **HTTP proxy**: outbound traffic routed through the approval proxy (via permission server)
 - **SANDBOX_API**: environment variable pointing to the permission server
+
+## Security
+
+- **No `SYS_ADMIN` capability** — agent container runs with minimal privileges
+- **Internal network only** — agent cannot reach the internet directly; all traffic goes through the permission server
+- **Proxy enforced at network level** — agent cannot bypass the proxy by unsetting env vars
+- **`exec` locked to approve-each** — host command execution always requires individual human approval, cannot be overridden
 
 ## Project Structure
 
@@ -181,7 +201,8 @@ src/
   config.ts        Sandbox config management
   proxy.ts         HTTP/HTTPS proxy with allowlist
   server.ts        Permission server (Bun.serve)
-  sync.ts          File sync from container overlay to host
+  exec.ts          Host command execution (approve-each only)
+  sync.ts          File sync from container to host
   git-sync.ts      Git staging repo → real remote sync
   cli.ts           Terminal approval tool
 ui/
@@ -189,12 +210,13 @@ ui/
   app.tsx          React dashboard app
   styles.css       Dashboard styles
 container/
-  entrypoint.sh    Docker entrypoint (overlayfs, git staging, proxy env)
+  entrypoint.sh    Docker entrypoint (workspace copy, git init)
   sdk.ts           Agent SDK
 tests/
   queue.test.ts    Queue tests
   config.test.ts   Config tests
   proxy.test.ts    Proxy logic tests
+  exec.test.ts     Exec tests
 ```
 
 ## License

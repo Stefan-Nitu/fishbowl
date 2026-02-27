@@ -49,6 +49,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   git: "\x1b[32m",
   packages: "\x1b[33m",
   sandbox: "\x1b[31m",
+  exec: "\x1b[38;5;208m", // orange
 };
 
 function colorCat(cat: string): string {
@@ -122,7 +123,7 @@ if (args.length > 0) {
     }
     default:
       console.log(`
-AI Sandbox CLI
+fishbowl CLI
 
 Usage:
   bun run cli list                   List pending requests
@@ -139,7 +140,7 @@ Usage:
 
 // --- Interactive watch mode ---
 console.log("\x1b[2J\x1b[H"); // Clear screen
-console.log("AI Sandbox — Interactive Mode");
+console.log("fishbowl — Interactive Mode");
 console.log("Commands: [a]pprove <id>, [d]eny <id>, [A] approve all, [D] deny all, [q]uit\n");
 
 const ws = new WebSocket(`${SERVER_URL.replace("http", "ws")}/ws`);
