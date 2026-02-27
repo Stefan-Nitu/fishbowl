@@ -1,0 +1,46 @@
+services:
+  sandbox-server:
+    build: .
+    command: ["bun", "run", "src/server.ts"]
+    ports:
+      - "3700:3700"   # Permission server + Web UI
+      - "3701:3701"   # HTTP proxy
+    volumes:
+      - ./data:/sandbox/data
+      - ./sandbox.config.json:/sandbox/sandbox.config.json
+    environment:
+      - SERVER_PORT=3700
+      - PROXY_PORT=3701
+      - PROXY_INLINE=true
+    working_dir: /sandbox
+
+  agent:
+    build: .
+    depends_on:
+      - sandbox-server
+    volumes:
+      # Host project mounted as read-only lower layer
+      - ${HOST_PROJECT:-./../}:/workspace/lower:ro
+      # Persistent upper layer for agent writes
+      - agent-upper:/workspace/upper
+      - agent-work:/workspace/work
+      # Git staging data
+      - agent-data:/data
+    environment:
+      - HTTP_PROXY=http://sandbox-server:3701
+      - HTTPS_PROXY=http://sandbox-server:3701
+      - SANDBOX_API=http://sandbox-server:3700
+    cap_add:
+      - SYS_ADMIN  # Required for fuse-overlayfs
+    devices:
+      - /dev/fuse:/dev/fuse
+    # Override with your agent command:
+    # docker compose run agent <your-agent-command>
+    command: ["bash"]
+    stdin_open: true
+    tty: true
+
+volumes:
+  agent-upper:
+  agent-work:
+  agent-data:

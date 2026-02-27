@@ -1,0 +1,21 @@
+{
+  "name": "ai-sandbox",
+  "version": "0.1.0",
+  "description": "Safety container for self-evolving AI agents",
+  "type": "module",
+  "scripts": {
+    "server": "bun run src/server.ts",
+    "proxy": "bun run src/proxy.ts",
+    "cli": "bun run src/cli.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "bun-types": "latest"
+  }
+}
