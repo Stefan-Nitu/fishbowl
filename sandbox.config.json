@@ -1,11 +1,15 @@
 {
   "allowedEndpoints": [
-    "api.anthropic.com"
+    "api.anthropic.com",
+    "registry.npmjs.org",
+    "registry.npmmirror.com"
   ],
   "gitStagingRepo": "/data/git-staging.git",
   "rules": {
     "allow": [],
-    "deny": []
+    "deny": [
+      "*.datadoghq.com"
+    ]
   },
   "categories": {
     "network": {

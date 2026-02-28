@@ -166,6 +166,14 @@ function App() {
     });
   }
 
+  async function alwaysDeny(id: string) {
+    await fetch(`/api/queue/${id}/deny`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alwaysDeny: true }),
+    });
+  }
+
   async function deleteRule(type: "allow" | "deny", rule: string) {
     const res = await fetch("/api/rules", {
       method: "DELETE",
@@ -264,6 +272,9 @@ function App() {
                   </button>
                   <button className="btn btn-deny" onClick={() => deny(req.id)}>
                     Deny
+                  </button>
+                  <button className="btn btn-always-deny" onClick={() => alwaysDeny(req.id)}>
+                    Always Deny
                   </button>
                 </div>
               </div>

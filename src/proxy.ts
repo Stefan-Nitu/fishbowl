@@ -85,6 +85,7 @@ export function startProxy(port = PROXY_PORT) {
 
   const server = Bun.serve({
     port,
+    idleTimeout: 255,
     async fetch(req) {
       // Regular HTTP proxy requests have absolute URLs
       if (req.method === "CONNECT") {

@@ -1,6 +1,6 @@
 import { queue } from "./queue";
 import { loadConfig, getConfig, saveConfig, applyConfigChange, addAllowedEndpoint, getRules, addRule, removeRule } from "./config";
-import { listChangedFiles, requestFileSync, applyFilesystemRequest } from "./sync";
+import { listChangedFiles, requestFileSync, applyFilesystemRequest, startLiveSync, stopLiveSync, fullSync } from "./sync";
 import { listUnsyncedBranches, requestGitSync } from "./git-sync";
 import { startProxy } from "./proxy";
 import { submitExec, getExecRequest } from "./exec";
@@ -35,6 +35,7 @@ queue.on("resolve", (req) => broadcast("resolve", req));
 
 const server = Bun.serve<WSData>({
   port: PORT,
+  idleTimeout: 255,
   routes: {
     "/": index,
 
@@ -268,7 +269,17 @@ const server = Bun.serve<WSData>({
 
         return Response.json({ ok });
       } else {
+        const request = queue.get(id);
         const ok = queue.deny(id, resolvedBy);
+
+        if (ok && (body as any)?.alwaysDeny && request) {
+          const rule = generateRule(request.category, request.action);
+          if (addRule("deny", rule)) {
+            await saveConfig();
+            broadcast("rules", getRules());
+          }
+        }
+
         return Response.json({ ok });
       }
     }
@@ -325,7 +336,15 @@ const server = Bun.serve<WSData>({
             }
           }
         } else if (msg.type === "deny") {
+          const request = queue.get(msg.id);
           queue.deny(msg.id, "web");
+          if (msg.alwaysDeny && request) {
+            const rule = generateRule(request.category, request.action);
+            if (addRule("deny", rule)) {
+              saveConfig();
+              broadcast("rules", getRules());
+            }
+          }
         }
       } catch {}
     },
@@ -351,15 +370,26 @@ if (process.env.PROXY_INLINE !== "false") {
   startProxy();
 }
 
+// Live mirror: sync agent workspace to host
+startLiveSync();
+
+async function gracefulShutdown(reason: string) {
+  console.log(`[server] Shutting down: ${reason}`);
+  stopLiveSync();
+  const synced = await fullSync();
+  console.log(`[server] Final sync complete (${synced} files)`);
+  for (const req of queue.pending()) {
+    queue.deny(req.id, "auto");
+  }
+  broadcast("shutdown", { reason });
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
 // Max uptime auto-shutdown
 if (maxUptimeMs) {
   console.log(`[server] Max uptime: ${formatDuration(maxUptimeMs)} — will shut down at ${new Date(startedAt + maxUptimeMs).toISOString()}`);
-  setTimeout(() => {
-    console.log("[server] Max uptime reached — shutting down");
-    for (const req of queue.pending()) {
-      queue.deny(req.id, "auto");
-    }
-    broadcast("shutdown", { reason: "max uptime reached" });
-    process.exit(0);
-  }, maxUptimeMs);
+  setTimeout(() => gracefulShutdown("max uptime reached"), maxUptimeMs);
 }

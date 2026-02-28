@@ -1,6 +1,7 @@
 services:
   sandbox-server:
     build: .
+    entrypoint: []
     command: ["bun", "run", "src/server.ts"]
     ports:
       - "3700:3700"   # Permission server + Web UI
@@ -8,10 +9,13 @@ services:
     volumes:
       - ./data:/sandbox/data
       - ./sandbox.config.json:/sandbox/sandbox.config.json
+      - ${HOST_PROJECT:-./../}:/workspace/lower
+      - workspace:/workspace/merged
     environment:
       - SERVER_PORT=3700
       - PROXY_PORT=3701
       - PROXY_INLINE=true
+      - MAX_UPTIME=${MAX_UPTIME:-}
     working_dir: /sandbox
     networks:
       - sandbox-net
@@ -22,17 +26,17 @@ services:
     depends_on:
       - sandbox-server
     volumes:
-      # Host project mounted as read-only lower layer
       - ${HOST_PROJECT:-./../}:/workspace/lower:ro
-      # Git staging data
+      - workspace:/workspace/merged
       - agent-data:/data
     environment:
       - HTTP_PROXY=http://sandbox-server:3701
       - HTTPS_PROXY=http://sandbox-server:3701
+      - NO_PROXY=api.anthropic.com,registry.npmjs.org,registry.npmmirror.com
       - SANDBOX_API=http://sandbox-server:3700
-    # Agent is ONLY on the internal network — can reach sandbox-server, nothing else
     networks:
       - sandbox-net
+      - external-net
     # Override with your agent command:
     # docker compose run agent <your-agent-command>
     command: ["bash"]
@@ -45,4 +49,5 @@ networks:
   external-net:      # Default bridge with internet access
 
 volumes:
+  workspace:
   agent-data:

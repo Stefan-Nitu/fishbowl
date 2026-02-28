@@ -15,6 +15,10 @@ RUN bun install --frozen-lockfile 2>/dev/null || bun install
 COPY . .
 
 # Create data directories
-RUN mkdir -p /data /workspace/lower /workspace/merged
+RUN mkdir -p /data /workspace/lower /workspace/merged \
+    && useradd -m -s /bin/bash agent \
+    && chown -R agent:agent /data /workspace /sandbox
+
+USER agent
 
 ENTRYPOINT ["/sandbox/container/entrypoint.sh"]
