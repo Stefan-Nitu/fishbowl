@@ -6,7 +6,7 @@ import { startProxy } from "./proxy";
 import { submitExec, getExecRequest } from "./exec";
 import { submitPackageRequest, getPackageRequest } from "./packages";
 import { readAuditLog } from "./audit";
-import { generateRule } from "./rules";
+import { generateRule, evaluateRules, extractNetworkHost } from "./rules";
 import { parseDuration, formatDuration } from "./uptime";
 import type { Category, ConfigChangeProposal, PermissionRequest } from "./types";
 import index from "../ui/index.html";
@@ -26,6 +26,21 @@ function broadcast(type: string, data: unknown) {
     try {
       ws.send(msg);
     } catch {}
+  }
+}
+
+function getMatchTarget(req: PermissionRequest): string {
+  if (req.category === "network") return extractNetworkHost(req.action) || req.action;
+  return req.action;
+}
+
+function autoResolveMatching(status: "approved" | "denied") {
+  const rules = getRules();
+  for (const req of queue.pending()) {
+    const verdict = evaluateRules(rules, req.category, getMatchTarget(req));
+    if (verdict === (status === "approved" ? "allow" : "deny")) {
+      queue.resolve(req.id, status, "auto");
+    }
   }
 }
 
@@ -258,12 +273,13 @@ const server = Bun.serve<WSData>({
           await saveConfig();
         }
 
-        // "Always allow" — generate and persist a rule
+        // "Always allow" — generate and persist a rule, auto-approve matching
         if (ok && (body as any)?.alwaysAllow && request) {
           const rule = generateRule(request.category, request.action);
           if (addRule("allow", rule)) {
             await saveConfig();
             broadcast("rules", getRules());
+            autoResolveMatching("approved");
           }
         }
 
@@ -277,6 +293,7 @@ const server = Bun.serve<WSData>({
           if (addRule("deny", rule)) {
             await saveConfig();
             broadcast("rules", getRules());
+            autoResolveMatching("denied");
           }
         }
 
@@ -332,6 +349,7 @@ const server = Bun.serve<WSData>({
               if (addRule("allow", rule)) {
                 saveConfig();
                 broadcast("rules", getRules());
+                autoResolveMatching("approved");
               }
             }
           }
@@ -343,6 +361,7 @@ const server = Bun.serve<WSData>({
             if (addRule("deny", rule)) {
               saveConfig();
               broadcast("rules", getRules());
+              autoResolveMatching("denied");
             }
           }
         }

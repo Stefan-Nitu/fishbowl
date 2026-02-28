@@ -79,7 +79,7 @@ export function evaluateRules(
   return null;
 }
 
-function extractNetworkHost(action: string): string | null {
+export function extractNetworkHost(action: string): string | null {
   const connectMatch = action.match(/^CONNECT\s+([^:]+)/);
   if (connectMatch) return connectMatch[1];
   try {
