@@ -72,6 +72,36 @@ appendAudit({ timestamp, id, category, ... });
 await appendAudit({ ... });
 ```
 
-## Max Uptime Shutdown
+## Live Sync File Watcher
 
-The shutdown timer runs as a `setTimeout` in the main event loop. On expiry, it synchronously denies all pending requests (which triggers their promises to resolve as `false`), broadcasts a shutdown event, then exits. This ensures agents waiting on approval get clean denials rather than hanging forever.
+`startLiveSync()` uses `fs.watch` with `recursive: true` and a debounced flush:
+
+```typescript
+// Changes are batched in a Set, flushed after 300ms of quiet
+let pending = new Set<string>();
+let timer: ReturnType<typeof setTimeout> | null = null;
+
+watcher = watch(WORKSPACE, { recursive: true }, (_event, filename) => {
+  if (!filename || shouldSkip(filename)) return;
+  pending.add(filename);
+  if (!timer) timer = setTimeout(flush, 300);
+});
+```
+
+The debounce prevents per-character syncing when the agent writes large files. The `Set` deduplicates rapid changes to the same file.
+
+## Graceful Shutdown
+
+All shutdown paths (SIGTERM, SIGINT, MAX_UPTIME) go through `gracefulShutdown()`:
+
+1. Stop file watcher (prevent new syncs during shutdown)
+2. Run `fullSync()` — `rsync --delete` for a complete mirror
+3. Deny all pending requests (clean denials, not hanging promises)
+4. Broadcast shutdown event to WebSocket clients
+5. `process.exit(0)`
+
+The `fullSync()` is awaited — shutdown blocks until the final sync completes. This ensures no agent work is lost.
+
+## Workspace Initialization Race
+
+The sandbox-server starts before the agent (`depends_on` in Docker Compose). The shared workspace volume is empty until the agent's entrypoint copies files in. `startLiveSync()` polls every 2s for `.git/HEAD` before starting the watcher — avoids watching an empty directory.

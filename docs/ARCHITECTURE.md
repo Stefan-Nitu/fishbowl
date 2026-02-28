@@ -41,7 +41,7 @@ src/exec.ts       Host command execution — rules check → queue → spawn pro
 src/packages.ts   Package install — parses bun/npm/pip/cargo, rules check → queue → run
 src/audit.ts      Append-only JSONL audit log — appendAudit() + readAuditLog()
 src/uptime.ts     Duration parsing (4h, 30m) and formatting, used by max uptime feature
-src/sync.ts       File sync — overlay diff detection, rules check → queue → copy to host
+src/sync.ts       File sync + live mirror — fs.watch real-time sync, fullSync on shutdown
 src/git-sync.ts   Git branch sync — staging repo → real remote, rules check → queue → push
 src/cli.ts        Terminal UI — approve/deny/watch/rules management
 
@@ -66,15 +66,15 @@ Agent calls sandbox.requestPackageInstall("bun", ["zod"])
       → Human denies → return denied
 ```
 
-## Data Flow: "Always Allow"
+## Data Flow: "Always Allow" / "Always Deny"
 
 ```
-Human clicks "Always Allow" on a pending request
-  → server approves the request
+Human clicks "Always Allow" or "Always Deny" on a pending request
+  → server approves/denies the request
   → generateRule(category, action) → e.g. "network(*.example.com)"
-  → addRule("allow", rule) → persisted to sandbox.config.json
+  → addRule("allow"|"deny", rule) → persisted to sandbox.config.json
   → broadcast("rules", ...) → all connected clients update
-  → future matching requests auto-allowed by rules engine
+  → future matching requests auto-allowed/denied by rules engine
 ```
 
 ## Audit Trail
@@ -92,3 +92,27 @@ Every `queue.resolve()` call fires `appendAudit()` (fire-and-forget). Entries ar
 ## Queue Superseding
 
 When a new filesystem request targets the same file as a pending one, the old request is auto-denied with `resolvedBy: "auto"`. This prevents stale approval of outdated writes.
+
+## Live Workspace Sync
+
+Both containers share a `workspace` Docker volume at `/workspace/merged`. The agent writes files there; the sandbox-server watches for changes and mirrors them to `/workspace/lower` (the host project bind mount).
+
+```
+Agent writes to /workspace/merged/src/foo.ts
+  → fs.watch detects change (300ms debounce)
+  → cp /workspace/merged/src/foo.ts → /workspace/lower/src/foo.ts
+  → host sees the change immediately
+```
+
+On shutdown (SIGTERM, SIGINT, or MAX_UPTIME), `fullSync()` runs `rsync --delete` to ensure a complete mirror before exit. The sandbox-server has read-write access to `/workspace/lower`; the agent container has it read-only.
+
+## Graceful Shutdown
+
+```
+SIGTERM/SIGINT/MAX_UPTIME
+  → stopLiveSync() — close file watcher
+  → fullSync() — rsync workspace to host
+  → deny all pending requests
+  → broadcast("shutdown", { reason })
+  → process.exit(0)
+```

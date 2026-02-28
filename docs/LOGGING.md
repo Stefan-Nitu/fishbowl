@@ -7,7 +7,10 @@ fishbowl uses `console.log` with prefix tags:
 ```
 [server] Permission server listening on :3700
 [server] Max uptime: 4h — will shut down at 2026-02-28T22:03:14.049Z
-[server] Max uptime reached — shutting down
+[server] Shutting down: SIGTERM
+[server] Final sync complete (42 files)
+[sync] Live mirror started: /workspace/merged → /workspace/lower
+[sync] Initial sync: 5 changed files
 [proxy] HTTP proxy listening on :3701
 ```
 
@@ -21,7 +24,7 @@ All state changes are broadcast as JSON over WebSocket:
 | `request` | `PermissionRequest` | New request queued |
 | `resolve` | `PermissionRequest` | Request approved/denied |
 | `rules` | `RuleSet` | Rule added/removed |
-| `shutdown` | `{ reason }` | Max uptime reached |
+| `shutdown` | `{ reason }` | SIGTERM, SIGINT, or max uptime |
 
 ## Audit Log
 

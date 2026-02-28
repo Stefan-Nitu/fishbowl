@@ -52,3 +52,25 @@ The WebSocket `message` handler in `server.ts` must be `async` because `applyFil
 ## Audit Log Format
 
 JSONL at `data/audit.log`. One line per resolved request. Read in reverse for most-recent-first. `appendAudit()` is fire-and-forget — uses try/catch to never block the queue resolve flow.
+
+## Live Sync
+
+### Volume Architecture
+
+Both containers share a `workspace` Docker volume. The sandbox-server has `/workspace/lower` (host bind mount) read-write; the agent has it read-only. This means only the server can write to the host — the agent's file changes flow through the shared volume → watcher → host.
+
+### fs.watch Gotchas
+
+`fs.watch` with `recursive: true` works on macOS (FSEvents) and Linux 5.9+ (fanotify). The watcher skips `.git/` and `node_modules/` to avoid noise. Changes are debounced at 300ms to batch rapid writes.
+
+### fullSync vs incremental
+
+`fullSync()` uses `rsync -a --delete` — it's a complete mirror that also removes files deleted in the workspace. The incremental watcher uses `cp` for creates/updates and `rm -f` for deletes. `fullSync` runs at startup and on shutdown; the watcher handles everything in between.
+
+### Bun Telemetry
+
+Bun sends telemetry to `*.datadoghq.com` via HTTPS. Since the agent container routes all traffic through the proxy, this shows up as `CONNECT http-intake.logs.us5.datadoghq.com:443`. Denied by default via a deny rule in `sandbox.config.json`.
+
+### Workspace Initialization Race
+
+The sandbox-server starts before the agent (Docker Compose `depends_on`). The workspace volume is empty until the agent's `entrypoint.sh` copies files into it. `startLiveSync()` polls for `/workspace/merged/.git/HEAD` every 2s before starting the watcher.
