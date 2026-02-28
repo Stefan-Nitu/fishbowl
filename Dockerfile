@@ -3,6 +3,7 @@ FROM oven/bun:1 AS base
 RUN apt-get update && apt-get install -y \
     git \
     curl \
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /sandbox

@@ -3,10 +3,14 @@ import { applyFilesystemRequest } from "../src/sync";
 import { PermissionQueue } from "../src/queue";
 import type { PermissionRequest } from "../src/types";
 import { rm, mkdir } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 
-const WORKSPACE = process.env.WORKSPACE || "/workspace/merged";
-const TEST_DIR = `${WORKSPACE}/__test_sync`;
+const TEST_DIR = join(tmpdir(), `fishbowl-sync-test-${process.pid}`);
 const TEST_FILE = `${TEST_DIR}/target.txt`;
+
+// Override WORKSPACE so applyFilesystemRequest writes to our temp dir
+process.env.WORKSPACE = TEST_DIR;
 
 function makeRequest(overrides: Partial<PermissionRequest> = {}): PermissionRequest {
   return {
@@ -36,7 +40,7 @@ describe("applyFilesystemRequest", () => {
     const req = makeRequest({
       metadata: {
         toolName: "Write",
-        targetFile: `__test_sync/target.txt`,
+        targetFile: "target.txt",
         writeContent: "hello from test",
       },
     });
@@ -52,7 +56,7 @@ describe("applyFilesystemRequest", () => {
     const req = makeRequest({
       metadata: {
         toolName: "Write",
-        targetFile: `__test_sync/target.txt`,
+        targetFile: "target.txt",
       },
     });
 
@@ -67,7 +71,7 @@ describe("applyFilesystemRequest", () => {
     const req = makeRequest({
       metadata: {
         toolName: "Edit",
-        targetFile: `__test_sync/target.txt`,
+        targetFile: "target.txt",
         editContext: { old_string: "const x = 1;", new_string: "const x = 99;" },
       },
     });
@@ -85,7 +89,7 @@ describe("applyFilesystemRequest", () => {
     const req = makeRequest({
       metadata: {
         toolName: "Edit",
-        targetFile: `__test_sync/target.txt`,
+        targetFile: "target.txt",
         editContext: { old_string: "const x = 1;", new_string: "const x = 99;" },
       },
     });
@@ -99,7 +103,7 @@ describe("applyFilesystemRequest", () => {
     const req = makeRequest({
       metadata: {
         toolName: "Edit",
-        targetFile: `__test_sync/nonexistent.txt`,
+        targetFile: "nonexistent.txt",
         editContext: { old_string: "x", new_string: "y" },
       },
     });

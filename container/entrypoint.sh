@@ -7,8 +7,8 @@ echo "[sandbox] Setting up sandbox environment..."
 # /workspace/lower = read-only host project (bind mounted)
 # /workspace/merged = writable copy the agent works on (tracked via git)
 
-echo "[sandbox] Copying project to workspace..."
-cp -a /workspace/lower/. /workspace/merged/
+echo "[sandbox] Syncing project to workspace..."
+rsync -a --delete /workspace/lower/ /workspace/merged/
 
 # --- Git tracking in workspace ---
 cd /workspace/merged

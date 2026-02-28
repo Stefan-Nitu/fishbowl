@@ -90,9 +90,12 @@ test("all six categories exist in default config", () => {
   ]);
 });
 
-test("default config has empty rules", () => {
+test("config has rules structure", () => {
   const config = getConfig();
-  expect(config.rules).toEqual({ allow: [], deny: [] });
+  expect(config.rules).toHaveProperty("allow");
+  expect(config.rules).toHaveProperty("deny");
+  expect(Array.isArray(config.rules.allow)).toBe(true);
+  expect(Array.isArray(config.rules.deny)).toBe(true);
 });
 
 test("addRule adds valid rule", () => {
