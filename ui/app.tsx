@@ -27,7 +27,12 @@ interface SandboxConfig {
   gitStagingRepo: string;
 }
 
-type Tab = "queue" | "config" | "history";
+interface RuleSet {
+  allow: string[];
+  deny: string[];
+}
+
+type Tab = "queue" | "config" | "rules" | "history";
 
 function timeAgo(ts: number): string {
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -35,6 +40,33 @@ function timeAgo(ts: number): string {
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   return `${Math.floor(s / 3600)}h ago`;
+}
+
+function FilesystemDiff({ metadata }: { metadata: Record<string, unknown> }) {
+  const toolName = metadata.toolName as string;
+  const targetFile = metadata.targetFile as string;
+
+  return (
+    <div className="fs-diff">
+      <div className="fs-target">{targetFile}</div>
+      {toolName === "Edit" && metadata.editContext && (() => {
+        const ctx = metadata.editContext as { old_string: string; new_string: string };
+        return (
+          <div className="diff-blocks">
+            <pre className="diff-old">{ctx.old_string}</pre>
+            <pre className="diff-new">{ctx.new_string}</pre>
+          </div>
+        );
+      })()}
+      {toolName === "Write" && metadata.writeContent && (
+        <pre className="diff-new">
+          {String(metadata.writeContent).length > 500
+            ? String(metadata.writeContent).slice(0, 500) + "\n..."
+            : String(metadata.writeContent)}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 function ExecOutput({ result }: { result: ExecResult }) {
@@ -57,6 +89,7 @@ function App() {
   const [pending, setPending] = useState<PermissionRequest[]>([]);
   const [recent, setRecent] = useState<PermissionRequest[]>([]);
   const [config, setConfig] = useState<SandboxConfig | null>(null);
+  const [rules, setRules] = useState<RuleSet>({ allow: [], deny: [] });
   const [tab, setTab] = useState<Tab>("queue");
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -77,6 +110,9 @@ function App() {
       if (msg.type === "init") {
         setPending(msg.data.pending);
         setConfig(msg.data.config);
+        if (msg.data.rules) setRules(msg.data.rules);
+      } else if (msg.type === "rules") {
+        setRules(msg.data);
       } else if (msg.type === "request") {
         setPending((prev) => [...prev, msg.data]);
       } else if (msg.type === "resolve") {
@@ -98,6 +134,9 @@ function App() {
     fetch("/api/config")
       .then((r) => r.json())
       .then(setConfig);
+    fetch("/api/rules")
+      .then((r) => r.json())
+      .then(setRules);
 
     connectWs();
     return () => wsRef.current?.close();
@@ -117,6 +156,24 @@ function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+  }
+
+  async function alwaysAllow(id: string) {
+    await fetch(`/api/queue/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alwaysAllow: true }),
+    });
+  }
+
+  async function deleteRule(type: "allow" | "deny", rule: string) {
+    const res = await fetch("/api/rules", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, rule }),
+    });
+    const data = await res.json();
+    if (data.rules) setRules(data.rules);
   }
 
   async function bulkAction(category: string, status: "approved" | "denied") {
@@ -144,6 +201,9 @@ function App() {
       <div className="tabs">
         <button className={tab === "queue" ? "active" : ""} onClick={() => setTab("queue")}>
           Queue {pending.length > 0 && `(${pending.length})`}
+        </button>
+        <button className={tab === "rules" ? "active" : ""} onClick={() => setTab("rules")}>
+          Rules ({rules.allow.length + rules.deny.length})
         </button>
         <button className={tab === "config" ? "active" : ""} onClick={() => setTab("config")}>
           Config
@@ -189,6 +249,9 @@ function App() {
                 {req.category === "exec" && req.metadata?.command && (
                   <pre className="exec-command">{String(req.metadata.command)}</pre>
                 )}
+                {req.category === "filesystem" && req.metadata?.toolName && (
+                  <FilesystemDiff metadata={req.metadata} />
+                )}
                 <div className="description">{req.description}</div>
                 {req.reason && <div className="description">Reason: {req.reason}</div>}
                 <div className="time">{req.id} — {timeAgo(req.createdAt)}</div>
@@ -196,10 +259,46 @@ function App() {
                   <button className="btn btn-approve" onClick={() => approve(req.id)}>
                     Approve
                   </button>
+                  <button className="btn btn-always" onClick={() => alwaysAllow(req.id)}>
+                    Always Allow
+                  </button>
                   <button className="btn btn-deny" onClick={() => deny(req.id)}>
                     Deny
                   </button>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "rules" && (
+        <div>
+          <div className="config-section" style={{ marginBottom: 16 }}>
+            <h3>Allow Rules</h3>
+            {rules.allow.length === 0 && (
+              <div className="config-item"><span className="config-key">No allow rules</span></div>
+            )}
+            {rules.allow.map((rule) => (
+              <div key={rule} className="config-item">
+                <span className="config-value">{rule}</span>
+                <button className="btn btn-deny btn-bulk" onClick={() => deleteRule("allow", rule)}>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="config-section">
+            <h3>Deny Rules</h3>
+            {rules.deny.length === 0 && (
+              <div className="config-item"><span className="config-key">No deny rules</span></div>
+            )}
+            {rules.deny.map((rule) => (
+              <div key={rule} className="config-item">
+                <span className="config-value">{rule}</span>
+                <button className="btn btn-deny btn-bulk" onClick={() => deleteRule("deny", rule)}>
+                  Remove
+                </button>
               </div>
             ))}
           </div>
@@ -257,6 +356,9 @@ function App() {
                   <span className={`status-badge ${req.status}`}>{req.status}</span>
                 </div>
                 <div className="description">{req.description}</div>
+                {req.category === "filesystem" && req.metadata?.toolName && (
+                  <FilesystemDiff metadata={req.metadata} />
+                )}
                 {req.category === "exec" && req.metadata?.execResult && (
                   <ExecOutput result={req.metadata.execResult as ExecResult} />
                 )}

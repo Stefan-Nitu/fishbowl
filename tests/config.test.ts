@@ -8,6 +8,9 @@ import {
   removeAllowedEndpoint,
   setCategoryMode,
   applyConfigChange,
+  getRules,
+  addRule,
+  removeRule,
 } from "../src/config";
 
 beforeEach(async () => {
@@ -85,4 +88,33 @@ test("all six categories exist in default config", () => {
     "sandbox",
     "exec",
   ]);
+});
+
+test("default config has empty rules", () => {
+  const config = getConfig();
+  expect(config.rules).toEqual({ allow: [], deny: [] });
+});
+
+test("addRule adds valid rule", () => {
+  expect(addRule("allow", "network(*.example.com)")).toBe(true);
+  expect(getRules().allow).toContain("network(*.example.com)");
+});
+
+test("addRule rejects invalid rule", () => {
+  expect(addRule("allow", "invalid(pattern)")).toBe(false);
+});
+
+test("addRule rejects duplicate", () => {
+  addRule("deny", "exec(rm *)");
+  expect(addRule("deny", "exec(rm *)")).toBe(false);
+});
+
+test("removeRule removes existing rule", () => {
+  addRule("allow", "git(main)");
+  expect(removeRule("allow", "git(main)")).toBe(true);
+  expect(getRules().allow).not.toContain("git(main)");
+});
+
+test("removeRule returns false for non-existent", () => {
+  expect(removeRule("allow", "network(nope)")).toBe(false);
 });

@@ -1,4 +1,5 @@
-import { isEndpointAllowed, getCategoryMode, loadConfig } from "./config";
+import { isEndpointAllowed, getCategoryMode, getRules, loadConfig } from "./config";
+import { evaluateRules } from "./rules";
 import { queue } from "./queue";
 import type { Socket } from "bun";
 
@@ -10,9 +11,12 @@ async function handleConnect(req: Request): Promise<Response> {
   const targetPort = parseInt(url.port || "443", 10);
 
   if (isEndpointAllowed(targetHost)) {
-    // Allowed — will be handled by the upgrade
     return new Response(null, { status: 200 });
   }
+
+  const verdict = evaluateRules(getRules(), "network", targetHost);
+  if (verdict === "deny") return new Response("Blocked by sandbox rule", { status: 403 });
+  if (verdict === "allow") return new Response(null, { status: 200 });
 
   const mode = getCategoryMode("network");
 
@@ -46,6 +50,10 @@ async function handleHttp(req: Request): Promise<Response> {
   if (isEndpointAllowed(targetHost)) {
     return fetch(req);
   }
+
+  const httpVerdict = evaluateRules(getRules(), "network", targetHost);
+  if (httpVerdict === "deny") return new Response("Blocked by sandbox rule", { status: 403 });
+  if (httpVerdict === "allow") return fetch(req);
 
   const mode = getCategoryMode("network");
 

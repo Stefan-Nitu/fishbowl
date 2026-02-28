@@ -135,12 +135,53 @@ async function requestExec(
   }
 }
 
+interface PackageResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+interface PackageResponse {
+  id: string;
+  status: "pending" | "approved" | "denied" | "running" | "completed" | "failed";
+  result?: PackageResult;
+}
+
+async function requestPackageInstall(
+  manager: string,
+  packages: string[],
+  reason?: string,
+): Promise<PackageResult> {
+  const res = await fetch(`${API}/api/packages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ manager, packages, action: "install", reason }),
+  });
+
+  const { id } = (await res.json()) as { id: string };
+
+  // Poll until completed
+  while (true) {
+    await Bun.sleep(500);
+    const poll = await fetch(`${API}/api/packages/${id}`);
+    const data = (await poll.json()) as PackageResponse;
+
+    if (data.status === "denied") {
+      throw new Error(`Package install denied: ${manager} ${packages.join(" ")}`);
+    }
+    if (data.status === "completed" || data.status === "failed") {
+      return data.result!;
+    }
+  }
+}
+
 export const sandbox = {
   requestPermission,
   proposeConfigChange,
   listPending,
   getConfig,
   requestExec,
+  requestPackageInstall,
 };
 
 export default sandbox;

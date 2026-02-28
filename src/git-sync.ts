@@ -1,5 +1,6 @@
 import { queue } from "./queue";
-import { getConfig, getCategoryMode } from "./config";
+import { getConfig, getCategoryMode, getRules } from "./config";
+import { evaluateRules } from "./rules";
 import type { GitSyncInfo } from "./types";
 
 export async function listUnsyncedBranches(): Promise<GitSyncInfo[]> {
@@ -47,6 +48,13 @@ export async function listUnsyncedBranches(): Promise<GitSyncInfo[]> {
 }
 
 export async function requestGitSync(branch: string): Promise<boolean> {
+  const verdict = evaluateRules(getRules(), "git", branch);
+  if (verdict === "deny") return false;
+  if (verdict === "allow") {
+    await performGitSync(branch);
+    return true;
+  }
+
   const mode = getCategoryMode("git");
 
   if (mode === "deny-all") return false;

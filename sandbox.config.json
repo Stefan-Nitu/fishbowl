@@ -1,12 +1,30 @@
 {
-  "allowedEndpoints": ["api.anthropic.com"],
+  "allowedEndpoints": [
+    "api.anthropic.com"
+  ],
   "gitStagingRepo": "/data/git-staging.git",
+  "rules": {
+    "allow": [],
+    "deny": []
+  },
   "categories": {
-    "network": { "mode": "approve-each" },
-    "filesystem": { "mode": "approve-each" },
-    "git": { "mode": "approve-each" },
-    "packages": { "mode": "approve-each" },
-    "sandbox": { "mode": "approve-each" },
-    "exec": { "mode": "approve-each" }
+    "network": {
+      "mode": "approve-each"
+    },
+    "filesystem": {
+      "mode": "approve-each"
+    },
+    "git": {
+      "mode": "approve-each"
+    },
+    "packages": {
+      "mode": "approve-each"
+    },
+    "sandbox": {
+      "mode": "approve-each"
+    },
+    "exec": {
+      "mode": "approve-each"
+    }
   }
 }

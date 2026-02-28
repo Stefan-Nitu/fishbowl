@@ -1,4 +1,6 @@
 import { queue } from "./queue";
+import { getRules } from "./config";
+import { evaluateRules } from "./rules";
 
 const DEFAULT_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
@@ -38,6 +40,34 @@ export async function submitExec(
   timeout?: number
 ): Promise<ExecRequest> {
   const timeoutMs = timeout ?? DEFAULT_TIMEOUT;
+
+  const verdict = evaluateRules(getRules(), "exec", command);
+  if (verdict === "deny") {
+    const execReq: ExecRequest = {
+      id: `exec-denied-${Date.now()}`,
+      command, cwd, reason, timeout: timeoutMs,
+      status: "denied", createdAt: Date.now(), completedAt: Date.now(),
+    };
+    execRequests.set(execReq.id, execReq);
+    return execReq;
+  }
+  if (verdict === "allow") {
+    const id = `exec-auto-${Date.now()}`;
+    const execReq: ExecRequest = {
+      id, command, cwd, reason, timeout: timeoutMs,
+      status: "running", createdAt: Date.now(),
+    };
+    execRequests.set(id, execReq);
+    try {
+      execReq.result = await runCommand(command, cwd, timeoutMs);
+      execReq.status = "completed";
+    } catch (err) {
+      execReq.result = { stdout: "", stderr: err instanceof Error ? err.message : String(err), exitCode: -1 };
+      execReq.status = "failed";
+    }
+    execReq.completedAt = Date.now();
+    return execReq;
+  }
 
   const { id, promise } = queue.request(
     "exec",

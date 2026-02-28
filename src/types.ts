@@ -21,9 +21,15 @@ export interface CategoryConfig {
   mode: ApprovalMode;
 }
 
+export interface RuleSet {
+  allow: string[];
+  deny: string[];
+}
+
 export interface SandboxConfig {
   allowedEndpoints: string[];
   gitStagingRepo: string;
+  rules: RuleSet;
   categories: Record<Category, CategoryConfig>;
 }
 
@@ -53,6 +59,7 @@ export interface GitSyncInfo {
 export const DEFAULT_CONFIG: SandboxConfig = {
   allowedEndpoints: ["api.anthropic.com"],
   gitStagingRepo: "/data/git-staging.git",
+  rules: { allow: [], deny: [] },
   categories: {
     network: { mode: "approve-each" },
     filesystem: { mode: "approve-each" },

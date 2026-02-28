@@ -1,5 +1,6 @@
-import type { SandboxConfig, Category, ApprovalMode, ConfigChangeProposal } from "./types";
+import type { SandboxConfig, Category, ApprovalMode, ConfigChangeProposal, RuleSet } from "./types";
 import { DEFAULT_CONFIG } from "./types";
+import { parseRule } from "./rules";
 
 const CONFIG_PATH = new URL("../sandbox.config.json", import.meta.url).pathname;
 
@@ -10,6 +11,7 @@ export async function loadConfig(): Promise<SandboxConfig> {
     const file = Bun.file(CONFIG_PATH);
     if (await file.exists()) {
       current = await file.json();
+      if (!current.rules) current.rules = { allow: [], deny: [] };
     }
   } catch {
     current = structuredClone(DEFAULT_CONFIG);
@@ -33,8 +35,8 @@ export function isEndpointAllowed(host: string): boolean {
 }
 
 export function getCategoryMode(category: Category): ApprovalMode {
-  // exec category is always approve-each, regardless of config
-  if (category === "exec") return "approve-each";
+  // exec and packages categories are always approve-each, regardless of config
+  if (category === "exec" || category === "packages") return "approve-each";
   return current.categories[category]?.mode ?? "approve-each";
 }
 
@@ -66,7 +68,29 @@ export function removeAllowedEndpoint(endpoint: string): boolean {
 }
 
 export function setCategoryMode(category: Category, mode: ApprovalMode): void {
-  // exec category ALWAYS requires approve-each — never allow override
-  if (category === "exec" && mode !== "approve-each") return;
+  // exec and packages categories ALWAYS require approve-each — never allow override
+  if ((category === "exec" || category === "packages") && mode !== "approve-each") return;
   current.categories[category] = { mode };
+}
+
+export function getRules(): RuleSet {
+  return current.rules || { allow: [], deny: [] };
+}
+
+export function addRule(type: "allow" | "deny", rule: string): boolean {
+  if (!current.rules) current.rules = { allow: [], deny: [] };
+  const list = current.rules[type];
+  if (list.includes(rule)) return false;
+  if (!parseRule(rule)) return false;
+  list.push(rule);
+  return true;
+}
+
+export function removeRule(type: "allow" | "deny", rule: string): boolean {
+  if (!current.rules) return false;
+  const list = current.rules[type];
+  const idx = list.indexOf(rule);
+  if (idx === -1) return false;
+  list.splice(idx, 1);
+  return true;
 }

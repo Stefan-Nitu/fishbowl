@@ -1,6 +1,7 @@
 import { queue } from "./queue";
-import { getCategoryMode } from "./config";
-import type { SyncFile } from "./types";
+import { getCategoryMode, getRules } from "./config";
+import { evaluateRules } from "./rules";
+import type { PermissionRequest, SyncFile } from "./types";
 
 const WORKSPACE = process.env.WORKSPACE || "/workspace/merged";
 const HOST_PROJECT = process.env.HOST_PROJECT || "/workspace/lower";
@@ -41,17 +42,30 @@ export async function requestFileSync(files: SyncFile[]): Promise<Map<string, bo
     return results;
   }
 
-  if (mode === "allow-all") {
-    for (const f of files) {
+  const needsQueue: SyncFile[] = [];
+  const rules = getRules();
+
+  for (const f of files) {
+    const verdict = evaluateRules(rules, "filesystem", f.path);
+    if (verdict === "deny") {
+      results.set(f.path, false);
+      continue;
+    }
+    if (verdict === "allow") {
       await syncFile(f.path);
       results.set(f.path, true);
+      continue;
     }
-    return results;
+    if (mode === "allow-all") {
+      await syncFile(f.path);
+      results.set(f.path, true);
+    } else {
+      needsQueue.push(f);
+    }
   }
 
-  // Request approval for each file
   const pending: { file: SyncFile; id: string; promise: Promise<boolean> }[] = [];
-  for (const f of files) {
+  for (const f of needsQueue) {
     const { id, promise } = queue.request(
       "filesystem",
       `sync ${f.path}`,
@@ -61,7 +75,6 @@ export async function requestFileSync(files: SyncFile[]): Promise<Map<string, bo
     pending.push({ file: f, id, promise });
   }
 
-  // Wait for all approvals (they resolve independently)
   await Promise.all(
     pending.map(async ({ file, promise }) => {
       const approved = await promise;
@@ -81,6 +94,52 @@ async function syncFile(relPath: string) {
   const dir = dst.substring(0, dst.lastIndexOf("/"));
   await Bun.$`mkdir -p ${dir}`.quiet();
   await Bun.$`cp ${src} ${dst}`.quiet();
+}
+
+export async function applyFilesystemRequest(
+  req: PermissionRequest
+): Promise<{ ok: boolean; error?: string }> {
+  const meta = req.metadata;
+  if (!meta?.toolName || !meta?.targetFile) {
+    return { ok: false, error: "Missing toolName or targetFile in metadata" };
+  }
+
+  const toolName = meta.toolName as string;
+  const targetFile = meta.targetFile as string;
+  const targetPath = `${WORKSPACE}/${targetFile}`;
+
+  if (toolName === "Write") {
+    const content = meta.writeContent as string | undefined;
+    if (content === undefined) return { ok: false, error: "No writeContent in metadata" };
+
+    // Ensure directory exists
+    const dir = targetPath.substring(0, targetPath.lastIndexOf("/"));
+    await Bun.$`mkdir -p ${dir}`.quiet();
+    await Bun.write(targetPath, content);
+    return { ok: true };
+  }
+
+  if (toolName === "Edit") {
+    const editContext = meta.editContext as { old_string: string; new_string: string } | undefined;
+    if (!editContext) return { ok: false, error: "No editContext in metadata" };
+
+    let currentContent: string;
+    try {
+      currentContent = await Bun.file(targetPath).text();
+    } catch {
+      return { ok: false, error: "Target file does not exist — edit is stale" };
+    }
+
+    if (!currentContent.includes(editContext.old_string)) {
+      return { ok: false, error: "old_string not found in file — edit is stale" };
+    }
+
+    const updated = currentContent.replace(editContext.old_string, editContext.new_string);
+    await Bun.write(targetPath, updated);
+    return { ok: true };
+  }
+
+  return { ok: false, error: `Unknown toolName: ${toolName}` };
 }
 
 function formatBytes(bytes: number): string {

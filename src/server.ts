@@ -1,13 +1,19 @@
 import { queue } from "./queue";
-import { loadConfig, getConfig, saveConfig, applyConfigChange, addAllowedEndpoint } from "./config";
-import { listChangedFiles, requestFileSync } from "./sync";
+import { loadConfig, getConfig, saveConfig, applyConfigChange, addAllowedEndpoint, getRules, addRule, removeRule } from "./config";
+import { listChangedFiles, requestFileSync, applyFilesystemRequest } from "./sync";
 import { listUnsyncedBranches, requestGitSync } from "./git-sync";
 import { startProxy } from "./proxy";
 import { submitExec, getExecRequest } from "./exec";
+import { submitPackageRequest, getPackageRequest } from "./packages";
+import { readAuditLog } from "./audit";
+import { generateRule } from "./rules";
+import { parseDuration, formatDuration } from "./uptime";
 import type { Category, ConfigChangeProposal, PermissionRequest } from "./types";
 import index from "../ui/index.html";
 
 const PORT = parseInt(process.env.SERVER_PORT || "3700", 10);
+const startedAt = Date.now();
+const maxUptimeMs = process.env.MAX_UPTIME ? parseDuration(process.env.MAX_UPTIME) : null;
 
 type WSData = { id: string };
 const wsClients = new Set<ReturnType<typeof server.upgrade extends (r: any, o: any) => infer R ? never : any>>();
@@ -115,6 +121,32 @@ const server = Bun.serve<WSData>({
       },
     },
 
+    // --- Rules endpoints ---
+    "/api/rules": {
+      GET: () => Response.json(getRules()),
+      POST: async (req) => {
+        const { type, rule } = (await req.json()) as { type: "allow" | "deny"; rule: string };
+        if (!type || !rule) {
+          return Response.json({ error: "type and rule are required" }, { status: 400 });
+        }
+        const added = addRule(type, rule);
+        if (added) {
+          await saveConfig();
+          broadcast("rules", getRules());
+        }
+        return Response.json({ added, rules: getRules() });
+      },
+      DELETE: async (req) => {
+        const { type, rule } = (await req.json()) as { type: "allow" | "deny"; rule: string };
+        const removed = removeRule(type, rule);
+        if (removed) {
+          await saveConfig();
+          broadcast("rules", getRules());
+        }
+        return Response.json({ removed, rules: getRules() });
+      },
+    },
+
     // --- Exec endpoints ---
     "/api/exec": {
       POST: async (req) => {
@@ -131,6 +163,51 @@ const server = Bun.serve<WSData>({
         return Response.json({ id: execReq.id }, { status: 201 });
       },
     },
+
+    // --- Packages endpoints ---
+    "/api/packages": {
+      POST: async (req) => {
+        const { manager, packages, action, reason, cwd, timeout } = (await req.json()) as {
+          manager: string;
+          packages: string[];
+          action?: "install" | "add" | "remove";
+          reason?: string;
+          cwd?: string;
+          timeout?: number;
+        };
+        if (!manager || !packages?.length) {
+          return Response.json({ error: "manager and packages are required" }, { status: 400 });
+        }
+        const pkgReq = await submitPackageRequest(manager, packages, action || "install", reason, cwd, timeout);
+        return Response.json({ id: pkgReq.id }, { status: 201 });
+      },
+    },
+
+    // --- Status endpoint ---
+    "/api/status": {
+      GET: () => {
+        const now = Date.now();
+        const uptimeMs = now - startedAt;
+        return Response.json({
+          startedAt,
+          uptime: formatDuration(uptimeMs),
+          maxUptimeMs: maxUptimeMs ?? null,
+          maxUptime: maxUptimeMs ? formatDuration(maxUptimeMs) : null,
+          remainingMs: maxUptimeMs ? Math.max(0, maxUptimeMs - uptimeMs) : null,
+          remaining: maxUptimeMs ? formatDuration(Math.max(0, maxUptimeMs - uptimeMs)) : null,
+        });
+      },
+    },
+
+    // --- Audit endpoints ---
+    "/api/audit": {
+      GET: async (req) => {
+        const url = new URL(req.url);
+        const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+        const entries = await readAuditLog(limit);
+        return Response.json(entries);
+      },
+    },
   },
 
   async fetch(req, server) {
@@ -144,6 +221,14 @@ const server = Bun.serve<WSData>({
       return Response.json(execReq);
     }
 
+    // Handle packages result lookup
+    const pkgMatch = url.pathname.match(/^\/api\/packages\/([^/]+)$/);
+    if (pkgMatch && req.method === "GET") {
+      const pkgReq = getPackageRequest(pkgMatch[1]);
+      if (!pkgReq) return Response.json({ error: "not found" }, { status: 404 });
+      return Response.json(pkgReq);
+    }
+
     // Handle queue item approve/deny with path params
     const queueMatch = url.pathname.match(/^\/api\/queue\/([^/]+)\/(approve|deny)$/);
     if (queueMatch && req.method === "POST") {
@@ -152,14 +237,33 @@ const server = Bun.serve<WSData>({
       const resolvedBy = (body as any)?.resolvedBy || "web";
 
       if (action === "approve") {
+        const request = queue.get(id);
+
+        // Filesystem requests: apply the write/edit before marking approved
+        if (request?.category === "filesystem" && request.metadata?.toolName) {
+          const applyResult = await applyFilesystemRequest(request);
+          if (!applyResult.ok) {
+            // Stale or failed — deny instead of approve
+            queue.deny(id, resolvedBy);
+            return Response.json({ ok: false, error: applyResult.error }, { status: 409 });
+          }
+        }
+
         const ok = queue.approve(id, resolvedBy);
 
-        // If this was a sandbox config proposal, apply it
-        const request = queue.get(id);
         if (ok && request?.category === "sandbox" && request.metadata?.proposal) {
           const proposal = request.metadata.proposal as ConfigChangeProposal;
           applyConfigChange(proposal);
           await saveConfig();
+        }
+
+        // "Always allow" — generate and persist a rule
+        if (ok && (body as any)?.alwaysAllow && request) {
+          const rule = generateRule(request.category, request.action);
+          if (addRule("allow", rule)) {
+            await saveConfig();
+            broadcast("rules", getRules());
+          }
         }
 
         return Response.json({ ok });
@@ -191,16 +295,38 @@ const server = Bun.serve<WSData>({
           data: {
             pending: queue.pending(),
             config: getConfig(),
+            rules: getRules(),
           },
         })
       );
     },
-    message(ws, message) {
-      // Clients can send commands via WebSocket too
+    async message(ws, message) {
       try {
         const msg = JSON.parse(String(message));
-        if (msg.type === "approve") queue.approve(msg.id, "web");
-        else if (msg.type === "deny") queue.deny(msg.id, "web");
+        if (msg.type === "approve") {
+          const request = queue.get(msg.id);
+          // Apply filesystem writes/edits before approving
+          if (request?.category === "filesystem" && request.metadata?.toolName) {
+            const applyResult = await applyFilesystemRequest(request);
+            if (!applyResult.ok) {
+              queue.deny(msg.id, "web");
+              ws.send(JSON.stringify({ type: "error", id: msg.id, error: applyResult.error }));
+              return;
+            }
+          }
+          queue.approve(msg.id, "web");
+          if (msg.alwaysAllow) {
+            if (request) {
+              const rule = generateRule(request.category, request.action);
+              if (addRule("allow", rule)) {
+                saveConfig();
+                broadcast("rules", getRules());
+              }
+            }
+          }
+        } else if (msg.type === "deny") {
+          queue.deny(msg.id, "web");
+        }
       } catch {}
     },
     close(ws) {
@@ -223,4 +349,17 @@ await queue.init();
 // Optionally start proxy in same process
 if (process.env.PROXY_INLINE !== "false") {
   startProxy();
+}
+
+// Max uptime auto-shutdown
+if (maxUptimeMs) {
+  console.log(`[server] Max uptime: ${formatDuration(maxUptimeMs)} — will shut down at ${new Date(startedAt + maxUptimeMs).toISOString()}`);
+  setTimeout(() => {
+    console.log("[server] Max uptime reached — shutting down");
+    for (const req of queue.pending()) {
+      queue.deny(req.id, "auto");
+    }
+    broadcast("shutdown", { reason: "max uptime reached" });
+    process.exit(0);
+  }, maxUptimeMs);
 }

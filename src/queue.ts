@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import type { PermissionRequest, Category, RequestStatus, QueueEvents } from "./types";
+import { appendAudit } from "./audit";
 
 const DATA_DIR = new URL("../data/", import.meta.url).pathname;
 const QUEUE_FILE = DATA_DIR + "queue.json";
@@ -56,6 +57,22 @@ export class PermissionQueue extends EventEmitter<QueueEvents> {
     reason?: string,
     metadata?: Record<string, unknown>
   ): { id: string; promise: Promise<boolean> } {
+    // Superseding: auto-deny existing pending request for same targetFile
+    if (category === "filesystem" && metadata?.targetFile) {
+      for (const existing of this.requests.values()) {
+        if (
+          existing.category === "filesystem" &&
+          existing.status === "pending" &&
+          existing.metadata?.targetFile === metadata.targetFile
+        ) {
+          this.resolve(existing.id, "denied", "auto");
+          existing.metadata = { ...existing.metadata, supersededNote: `superseded by next request` };
+          this.schedulePersist();
+          break;
+        }
+      }
+    }
+
     const id = this.nextId();
     const req: PermissionRequest = {
       id,
@@ -87,6 +104,18 @@ export class PermissionQueue extends EventEmitter<QueueEvents> {
     req.resolvedBy = resolvedBy;
     this.schedulePersist();
     this.emit("resolve", req);
+
+    // Fire-and-forget audit log
+    appendAudit({
+      timestamp: req.resolvedAt,
+      id: req.id,
+      category: req.category,
+      action: req.action,
+      decision: status,
+      resolvedBy: req.resolvedBy,
+      durationMs: req.resolvedAt - req.createdAt,
+      metadata: req.metadata,
+    });
 
     const waiter = this.waiters.get(id);
     if (waiter) {

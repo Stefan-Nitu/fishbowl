@@ -31,6 +31,14 @@ async function denyRequest(id: string) {
   });
 }
 
+async function approveAlwaysAllow(id: string) {
+  await fetch(`${SERVER_URL}/api/queue/${id}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resolvedBy: "cli", alwaysAllow: true }),
+  });
+}
+
 async function bulkAction(category: string, status: "approved" | "denied") {
   await fetch(`${SERVER_URL}/api/queue/bulk`, {
     method: "POST",
@@ -121,6 +129,57 @@ if (args.length > 0) {
       }
       break;
     }
+    case "rules": {
+      const res = await fetch(`${SERVER_URL}/api/rules`);
+      const rules = (await res.json()) as { allow: string[]; deny: string[] };
+      console.log("\nAllow rules:");
+      for (const r of rules.allow) console.log(`  \x1b[32m+\x1b[0m ${r}`);
+      if (rules.allow.length === 0) console.log("  (none)");
+      console.log("\nDeny rules:");
+      for (const r of rules.deny) console.log(`  \x1b[31m-\x1b[0m ${r}`);
+      if (rules.deny.length === 0) console.log("  (none)");
+      break;
+    }
+    case "allow": {
+      const rule = rest.join(" ");
+      if (!rule) { console.log("Usage: cli allow <rule>"); break; }
+      const res = await fetch(`${SERVER_URL}/api/rules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "allow", rule }),
+      });
+      const { added } = (await res.json()) as { added: boolean };
+      console.log(added ? `Added allow rule: ${rule}` : `Rule already exists or invalid`);
+      break;
+    }
+    case "deny-rule": {
+      const rule = rest.join(" ");
+      if (!rule) { console.log("Usage: cli deny-rule <rule>"); break; }
+      const res = await fetch(`${SERVER_URL}/api/rules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "deny", rule }),
+      });
+      const { added } = (await res.json()) as { added: boolean };
+      console.log(added ? `Added deny rule: ${rule}` : `Rule already exists or invalid`);
+      break;
+    }
+    case "rm-rule": {
+      const rule = rest.join(" ");
+      if (!rule) { console.log("Usage: cli rm-rule <rule>"); break; }
+      let removed = false;
+      for (const type of ["allow", "deny"] as const) {
+        const res = await fetch(`${SERVER_URL}/api/rules`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type, rule }),
+        });
+        const data = (await res.json()) as { removed: boolean };
+        if (data.removed) { console.log(`Removed ${type} rule: ${rule}`); removed = true; break; }
+      }
+      if (!removed) console.log(`Rule not found: ${rule}`);
+      break;
+    }
     default:
       console.log(`
 fishbowl CLI
@@ -131,6 +190,10 @@ Usage:
   bun run cli deny <id> [id...]      Deny request(s)
   bun run cli approve --all <cat>    Approve all in category
   bun run cli deny --all <cat>       Deny all in category
+  bun run cli rules                  List all rules
+  bun run cli allow <rule>           Add an allow rule
+  bun run cli deny-rule <rule>       Add a deny rule
+  bun run cli rm-rule <rule>         Remove a rule
   bun run cli watch                  Interactive watch mode
 `);
   }
@@ -141,7 +204,7 @@ Usage:
 // --- Interactive watch mode ---
 console.log("\x1b[2J\x1b[H"); // Clear screen
 console.log("fishbowl — Interactive Mode");
-console.log("Commands: [a]pprove <id>, [d]eny <id>, [A] approve all, [D] deny all, [q]uit\n");
+console.log("Commands: [a]pprove <id>, [aa] always allow <id>, [d]eny <id>, [A] approve all, [D] deny all, [q]uit\n");
 
 const ws = new WebSocket(`${SERVER_URL.replace("http", "ws")}/ws`);
 
@@ -191,7 +254,10 @@ async function readLoop() {
     const parts = line.split(/\s+/);
     const cmd = parts[0];
 
-    if ((cmd === "a" || cmd === "approve") && parts[1]) {
+    if (cmd === "aa" && parts[1]) {
+      await approveAlwaysAllow(parts[1]);
+      console.log(`\x1b[34m✓ ${parts[1]} approved + rule created\x1b[0m`);
+    } else if ((cmd === "a" || cmd === "approve") && parts[1]) {
       await approveRequest(parts[1]);
     } else if ((cmd === "d" || cmd === "deny") && parts[1]) {
       await denyRequest(parts[1]);

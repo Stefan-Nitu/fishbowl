@@ -13,7 +13,7 @@ Safety container for self-evolving AI agents. The agent can read anything, write
 │  └──────────────┘  │  - WebSocket (realtime)  │  │
 │                     │  - Web Dashboard         │  │
 │  ┌──────────────┐  │  - Queue + Config mgmt   │  │
-│  │  Web UI       │◄─┤  - File sync (approved) │  │
+│  │  Web UI       │◄─┤  - Audit log            │  │
 │  │  (browser)    │  └────────┬────────────────┘  │
 │  └──────────────┘           │                    │
 │                     ┌───────┴────────┐           │
@@ -65,16 +65,53 @@ An AI agent runs inside a Docker container on an isolated internal network. The 
 
 ## Permission Categories
 
-| Category | What needs approval | Granularity |
+| Category | What needs approval | Mode |
 |---|---|---|
-| `network` | HTTP requests to hosts not in the allowlist | Per-request or bulk per domain |
-| `filesystem` | Syncing agent's file changes to the host | Per-file or bulk |
-| `git` | Pushing from the staging repo to the real remote | Per-branch |
-| `packages` | Installing new packages | Per-package |
-| `sandbox` | Changing sandbox config (allowlist, modes) | Always individual |
-| `exec` | Executing commands on the host | Always individual |
+| `network` | HTTP requests to hosts not in the allowlist | Configurable |
+| `filesystem` | Syncing agent's file changes to the host | Configurable |
+| `git` | Pushing from the staging repo to the real remote | Configurable |
+| `packages` | Installing packages (bun/npm/pip/cargo) | Always approve-each |
+| `sandbox` | Changing sandbox config (allowlist, modes) | Always approve-each |
+| `exec` | Executing commands on the host | Always approve-each |
 
-Each category has a mode: `approve-each`, `approve-bulk`, `allow-all`, or `deny-all`. Set in `sandbox.config.json`. The `exec` category is locked to `approve-each` and cannot be overridden.
+Each category has a mode: `approve-each`, `approve-bulk`, `allow-all`, or `deny-all`. The `exec` and `packages` categories are locked to `approve-each` and cannot be overridden.
+
+## Rules
+
+Pattern-based rules auto-approve or auto-deny requests without human intervention:
+
+```sh
+# Allow all requests to GitHub
+network(*.github.com)
+
+# Allow bun test commands
+exec(bun test *)
+
+# Deny destructive commands
+exec(rm -rf *)
+
+# Allow recursive file sync under src/
+filesystem(src/**)
+
+# Block .env files
+filesystem(.env*)
+```
+
+Rules are persisted in `sandbox.config.json`. Deny rules are checked first — deny always beats allow. Bare `exec` and `packages` allow rules (match-all) are silently ignored as a safety measure.
+
+Click "Always Allow" on any request to auto-generate a rule from its context.
+
+## Max Uptime
+
+Set a time limit for the fishbowl session:
+
+```sh
+MAX_UPTIME=4h bun run server     # Shut down after 4 hours
+MAX_UPTIME=30m bun run server    # 30 minutes
+MAX_UPTIME=1h30m bun run server  # 1.5 hours
+```
+
+On expiry, all pending requests are denied, WebSocket clients are notified, and the process exits. Check remaining time via `GET /api/status`.
 
 ## Git Inside the Sandbox
 
@@ -94,6 +131,13 @@ const ok = await sandbox.requestPermission(
   "Need training data"
 );
 
+// Install packages (requires individual approval)
+const pkg = await sandbox.requestPackageInstall(
+  "bun",
+  ["zod", "hono"],
+  "Need HTTP framework and validation"
+);
+
 // Execute a command on the host (requires individual approval)
 const result = await sandbox.requestExec(
   "bun test",
@@ -109,6 +153,8 @@ await sandbox.proposeConfigChange(
 );
 ```
 
+See [`container/README.md`](container/README.md) for full SDK documentation.
+
 ## API
 
 ### REST
@@ -117,24 +163,31 @@ await sandbox.proposeConfigChange(
 |---|---|---|
 | `GET` | `/api/queue` | List pending and recent requests |
 | `POST` | `/api/queue` | Submit a permission request |
-| `POST` | `/api/queue/:id/approve` | Approve a request |
+| `POST` | `/api/queue/:id/approve` | Approve a request (optional `alwaysAllow` flag) |
 | `POST` | `/api/queue/:id/deny` | Deny a request |
 | `POST` | `/api/queue/bulk` | Bulk approve/deny by category |
 | `GET` | `/api/config` | Current sandbox config |
 | `POST` | `/api/config/propose` | Agent proposes a config change |
+| `GET` | `/api/rules` | List all rules |
+| `POST` | `/api/rules` | Add a rule |
+| `DELETE` | `/api/rules` | Remove a rule |
 | `GET` | `/api/sync/files` | List changed files in workspace |
 | `POST` | `/api/sync/files` | Request file sync to host |
 | `GET` | `/api/sync/git` | List unsynced branches |
 | `POST` | `/api/sync/git` | Request git sync to real remote |
-| `POST` | `/api/exec` | Submit exec request (returns `{ id }`) |
-| `GET` | `/api/exec/:id` | Get exec result |
+| `POST` | `/api/exec` | Submit exec request |
+| `GET` | `/api/exec/:id` | Get exec status/result |
+| `POST` | `/api/packages` | Submit package install request |
+| `GET` | `/api/packages/:id` | Get package request status |
+| `GET` | `/api/audit?limit=N` | Read audit log (most recent first) |
+| `GET` | `/api/status` | Server uptime and TTL info |
 
 ### WebSocket
 
 Connect to `/ws` for real-time updates. Messages are JSON with `type` field:
 
-- **Server → Client**: `init` (current state on connect), `request` (new request), `resolve` (request resolved)
-- **Client → Server**: `approve` / `deny` with `id` field
+- **Server → Client**: `init` (state on connect), `request` (new), `resolve` (approved/denied), `rules` (changed), `shutdown` (TTL expired)
+- **Client → Server**: `approve` / `deny` with `id` field, optional `alwaysAllow`
 
 ### CLI
 
@@ -144,6 +197,8 @@ bun run cli approve req-0           # Approve a request
 bun run cli deny req-1              # Deny a request
 bun run cli approve --all network   # Approve all network requests
 bun run cli watch                   # Interactive mode with live updates
+bun run cli rules                   # List all rules
+bun run cli allow "exec(bun test *)" # Add allow rule
 ```
 
 ## Configuration
@@ -154,6 +209,7 @@ bun run cli watch                   # Interactive mode with live updates
 {
   "allowedEndpoints": ["api.anthropic.com"],
   "gitStagingRepo": "/data/git-staging.git",
+  "rules": { "allow": [], "deny": [] },
   "categories": {
     "network": { "mode": "approve-each" },
     "filesystem": { "mode": "approve-each" },
@@ -164,6 +220,18 @@ bun run cli watch                   # Interactive mode with live updates
   }
 }
 ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_PORT` | `3700` | Permission server port |
+| `PROXY_PORT` | `3701` | HTTP proxy port |
+| `PROXY_INLINE` | `true` | Run proxy in same process as server |
+| `MAX_UPTIME` | _(none)_ | Auto-shutdown after duration (e.g., `4h`, `30m`) |
+| `WORKSPACE` | `/workspace/merged` | Container workspace path |
+| `HOST_PROJECT` | `/workspace/lower` | Host project mount path |
+| `SANDBOX_API` | `http://localhost:3700` | SDK: permission server URL |
 
 ## Docker
 
@@ -182,41 +250,64 @@ The container gets:
 - **Internal network**: agent can only reach the permission server, not the internet
 - **Git-tracked workspace**: host project copied in, changes tracked via git diff
 - **Git staging**: local bare repo as `origin`, free to commit/push/branch
-- **HTTP proxy**: outbound traffic routed through the approval proxy (via permission server)
+- **HTTP proxy**: outbound traffic routed through the approval proxy
 - **SANDBOX_API**: environment variable pointing to the permission server
 
 ## Security
 
 - **No `SYS_ADMIN` capability** — agent container runs with minimal privileges
-- **Internal network only** — agent cannot reach the internet directly; all traffic goes through the permission server
-- **Proxy enforced at network level** — agent cannot bypass the proxy by unsetting env vars
-- **`exec` locked to approve-each** — host command execution always requires individual human approval, cannot be overridden
+- **Internal network only** — agent cannot reach the internet directly
+- **Proxy enforced at network level** — agent cannot bypass the proxy
+- **`exec` and `packages` locked to approve-each** — host commands and package installs always require individual human approval
+- **Deny-first rules** — deny rules always win over allow rules
+- **Bare exec/packages allow rules ignored** — `exec(*)` and `packages(*)` are silently skipped
+- **Audit trail** — every permission decision logged to `data/audit.log`
+- **Max uptime** — optional session TTL prevents runaway agents
 
 ## Project Structure
 
 ```
 src/
-  types.ts         Shared types
-  queue.ts         Async permission queue with persistence
-  config.ts        Sandbox config management
+  types.ts         Shared types (Category, RuleSet, SandboxConfig, etc.)
+  queue.ts         Async permission queue with persistence + audit hook
+  config.ts        Sandbox config management + rule CRUD
+  rules.ts         Rule parsing, matching, evaluation, generation
   proxy.ts         HTTP/HTTPS proxy with allowlist
-  server.ts        Permission server (Bun.serve)
+  server.ts        Permission server (REST + WebSocket + max uptime)
   exec.ts          Host command execution (approve-each only)
+  packages.ts      Package install (bun/npm/pip/cargo, approve-each only)
+  audit.ts         Append-only JSONL audit log
+  uptime.ts        Duration parsing (4h, 30m) and formatting
   sync.ts          File sync from container to host
   git-sync.ts      Git staging repo → real remote sync
   cli.ts           Terminal approval tool
 ui/
-  index.html       Web dashboard
+  index.html       Web dashboard entry point
   app.tsx          React dashboard app
   styles.css       Dashboard styles
 container/
   entrypoint.sh    Docker entrypoint (workspace copy, git init)
   sdk.ts           Agent SDK
+  README.md        SDK documentation
 tests/
-  queue.test.ts    Queue tests
-  config.test.ts   Config tests
-  proxy.test.ts    Proxy logic tests
-  exec.test.ts     Exec tests
+  config.test.ts            Config unit tests
+  config-persistence.test.ts  Save/load round-trip tests
+  rules.test.ts             Rules engine tests
+  packages.test.ts          Package parsing + hardening tests
+  audit.test.ts             Audit log tests
+  uptime.test.ts            Duration parsing tests
+  sync.test.ts              Filesystem sync tests
+  e2e.test.ts               Full integration tests
+  e2e-docker.sh             Docker smoke test
+docs/
+  ARCHITECTURE.md  System design
+  PLAN.md          Project status and roadmap
+  PATTERNS.md      Code conventions
+  TESTING.md       Test approach
+  DEV_NOTES.md     Implementation notes
+  CONCURRENCY.md   Async patterns
+  ERROR_HANDLING.md Error strategies
+  LOGGING.md       Logging and monitoring
 ```
 
 ## License
