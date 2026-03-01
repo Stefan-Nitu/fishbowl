@@ -42,6 +42,9 @@ export function matchPattern(
     return new Bun.Glob(pattern).match(target);
   }
 
+  // *.domain also matches the bare domain (e.g., *.example.com matches example.com)
+  if (pattern.startsWith("*.") && target === pattern.slice(2)) return true;
+
   // Simple glob-to-regex: * matches anything (including / and spaces)
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp("^" + escaped.replace(/\*+/g, ".*") + "$");

@@ -31,6 +31,7 @@ function broadcast(type: string, data: unknown) {
 
 function getMatchTarget(req: PermissionRequest): string {
   if (req.category === "network") return extractNetworkHost(req.action) || req.action;
+  if (req.category === "filesystem") return req.action.replace(/^sync\s+/, "");
   return req.action;
 }
 

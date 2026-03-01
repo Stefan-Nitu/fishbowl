@@ -46,6 +46,12 @@ test("matchPattern: hostname glob", () => {
   expect(matchPattern("*.example.com", "evil.com", "network")).toBe(false);
 });
 
+test("matchPattern: *.domain also matches bare domain", () => {
+  expect(matchPattern("*.example.com", "example.com", "network")).toBe(true);
+  expect(matchPattern("*.github.com", "github.com", "network")).toBe(true);
+  expect(matchPattern("*.example.com", "notexample.com", "network")).toBe(false);
+});
+
 test("matchPattern: command glob with spaces and slashes", () => {
   // Arrange: * should match anything including / for non-filesystem
   expect(matchPattern("bun test *", "bun test src/", "exec")).toBe(true);

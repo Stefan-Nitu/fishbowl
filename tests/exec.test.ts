@@ -8,10 +8,10 @@ beforeEach(async () => {
 });
 
 test("exec request goes through queue", async () => {
-  const execReq = await submitExec("echo hello", undefined, "test");
+  const execReq = await submitExec("echo queued-test", undefined, "test");
   expect(execReq.id).toMatch(/^req-/);
   expect(execReq.status).toBe("pending");
-  expect(execReq.command).toBe("echo hello");
+  expect(execReq.command).toBe("echo queued-test");
 });
 
 test("exec category refuses allow-all mode override", () => {
