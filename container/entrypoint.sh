@@ -45,6 +45,24 @@ echo "  Git staging: $STAGING_REPO"
 echo "  Sandbox API: $SANDBOX_API"
 echo ""
 
+# --- Watchdog: exit when sandbox-server shuts down ---
+(
+  while true; do
+    sleep 10
+    STATUS=$(curl -sf "${SANDBOX_API}/api/status" 2>/dev/null) || {
+      echo "[sandbox] Server unreachable — exiting"
+      kill -TERM $$ 2>/dev/null
+      break
+    }
+    REMAINING=$(echo "$STATUS" | grep -o '"remainingMs":[0-9]*' | cut -d: -f2)
+    if [ -n "$REMAINING" ] && [ "$REMAINING" -le 0 ] 2>/dev/null; then
+      echo "[sandbox] Max uptime reached — exiting"
+      kill -TERM $$ 2>/dev/null
+      break
+    fi
+  done
+) &
+
 # --- Run the agent ---
 if [ $# -eq 0 ]; then
   echo "[sandbox] No command specified. Starting interactive shell."
