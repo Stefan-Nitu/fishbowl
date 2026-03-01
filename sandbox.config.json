@@ -6,9 +6,13 @@
   ],
   "gitStagingRepo": "/data/git-staging.git",
   "rules": {
-    "allow": [],
+    "allow": [
+      "exec(echo hello)",
+      "packages(bun install test-e2e-pkg)"
+    ],
     "deny": [
-      "*.datadoghq.com"
+      "*.datadoghq.com",
+      "network(*.datadoghq.com)"
     ]
   },
   "categories": {
