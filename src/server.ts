@@ -280,8 +280,8 @@ const server = Bun.serve<WSData>({
           if (addRule("allow", rule)) {
             await saveConfig();
             broadcast("rules", getRules());
-            autoResolveMatching("approved");
           }
+          autoResolveMatching("approved");
         }
 
         return Response.json({ ok });
@@ -294,8 +294,8 @@ const server = Bun.serve<WSData>({
           if (addRule("deny", rule)) {
             await saveConfig();
             broadcast("rules", getRules());
-            autoResolveMatching("denied");
           }
+          autoResolveMatching("denied");
         }
 
         return Response.json({ ok });
@@ -344,15 +344,13 @@ const server = Bun.serve<WSData>({
             }
           }
           queue.approve(msg.id, "web");
-          if (msg.alwaysAllow) {
-            if (request) {
-              const rule = generateRule(request.category, request.action);
-              if (addRule("allow", rule)) {
-                saveConfig();
-                broadcast("rules", getRules());
-                autoResolveMatching("approved");
-              }
+          if (msg.alwaysAllow && request) {
+            const rule = generateRule(request.category, request.action);
+            if (addRule("allow", rule)) {
+              saveConfig();
+              broadcast("rules", getRules());
             }
+            autoResolveMatching("approved");
           }
         } else if (msg.type === "deny") {
           const request = queue.get(msg.id);
@@ -362,8 +360,8 @@ const server = Bun.serve<WSData>({
             if (addRule("deny", rule)) {
               saveConfig();
               broadcast("rules", getRules());
-              autoResolveMatching("denied");
             }
+            autoResolveMatching("denied");
           }
         }
       } catch {}

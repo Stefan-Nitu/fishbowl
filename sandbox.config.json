@@ -8,7 +8,9 @@
   "rules": {
     "allow": [
       "exec(echo hello)",
-      "packages(bun install test-e2e-pkg)"
+      "packages(bun install test-e2e-pkg)",
+      "network(*.anthropic.com)",
+      "network(*.claude.com)"
     ],
     "deny": [
       "*.datadoghq.com",
